@@ -80,6 +80,27 @@ class BusinessAnalysisTests(unittest.TestCase):
 
         self.assertEqual(answer, "Grounded response")
 
+    @patch("utils.ai_analyst.ask_ai")
+    def test_unrelated_command_is_rejected_without_ai_call(self, mock_ask_ai):
+        """Development commands should stop at the local scope guard."""
+        result = ask_business_analyst("git push", self.df)
+
+        self.assertEqual(result["mode"], "Scope Guard")
+        self.assertNotIn("Python-Verified Evidence", result["answer"])
+        mock_ask_ai.assert_not_called()
+
+    @patch("utils.ai_analyst.ask_ai", return_value="Relevant analysis")
+    def test_open_business_question_passes_scope_guard(self, mock_ask_ai):
+        """Open-ended dataset questions must still reach grounded AI analysis."""
+        result = ask_business_analyst(
+            "What should management do about weak performance in the West?",
+            self.df,
+        )
+
+        self.assertEqual(result["mode"], "AI + Python Evidence")
+        self.assertEqual(result["answer"], "Relevant analysis")
+        mock_ask_ai.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

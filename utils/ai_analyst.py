@@ -9,6 +9,7 @@ auditable under the dashboard's active filters.
 from __future__ import annotations
 
 import os
+import re
 
 import pandas as pd
 import streamlit as st
@@ -77,6 +78,53 @@ def _single_result_report(answer: str, evidence: str, action: str) -> str:
         "Superstore transactions.\n\n"
         f"### Recommended Action\n{action}"
     )
+
+
+def is_dataset_question(question: str, df: pd.DataFrame) -> bool:
+    """Return whether a question belongs to the Superstore analysis domain.
+
+    Explicit development commands are rejected first. Other questions are
+    accepted when they contain a business-analysis concept or reference a value
+    from a major dataset dimension. This local gate prevents unrelated prompts
+    from consuming an AI request or receiving a fabricated business report.
+    """
+    normalized = " ".join(question.casefold().split())
+    if not normalized:
+        return False
+
+    technical_command = re.compile(
+        r"^(git|pip|python|python3|npm|npx|yarn|docker|kubectl|terraform|"
+        r"curl|wget|ssh|streamlit|powershell|bash)\b"
+    )
+    if technical_command.search(normalized):
+        return False
+
+    business_terms = {
+        "sale", "sales", "revenue", "profit", "profitable", "profitability",
+        "margin", "loss", "losses", "order", "orders", "customer", "customers",
+        "product", "products", "category", "categories", "subcategory",
+        "sub-category", "segment", "region", "state", "city", "market",
+        "discount", "discounting", "price", "pricing", "quantity", "units",
+        "shipping", "delivery", "delay", "ship mode", "inventory", "stock",
+        "replenishment", "forecast", "forecasting", "growth", "trend", "risk",
+        "performance", "opportunity", "opportunities", "management", "business",
+        "priority", "priorities", "strategy", "operations", "year", "month",
+        "quarter", "compare", "highest", "lowest", "best", "worst",
+    }
+    tokens = set(re.findall(r"[a-z0-9-]+", normalized))
+    if tokens.intersection(business_terms):
+        return True
+
+    # Accept references to actual filtered dimension values such as "West",
+    # "Technology", or a named state, even when no explicit metric is supplied.
+    for column in ("region", "category", "sub_category", "segment", "state", "city"):
+        if column not in df.columns:
+            continue
+        values = df[column].dropna().astype(str).str.casefold().unique()
+        if any(len(value) >= 3 and value in normalized for value in values):
+            return True
+
+    return False
 
 
 def answer_locally(question: str, df: pd.DataFrame) -> str | None:
@@ -230,6 +278,16 @@ def ask_business_analyst(question: str, df: pd.DataFrame) -> dict[str, str]:
     """Route a question to deterministic Python or grounded AI interpretation."""
     if not isinstance(question, str) or not question.strip():
         raise ValueError("Please enter a business question.")
+    if not is_dataset_question(question, df):
+        return {
+            "mode": "Scope Guard",
+            "answer": (
+                "This assistant only answers questions about the currently "
+                "filtered Superstore business data. Ask about sales, profit, "
+                "products, customers, regions, discounts, shipping, forecasting, "
+                "inventory evidence, or management priorities."
+            ),
+        }
     local_answer = answer_locally(question, df)
     if local_answer is not None:
         return {"mode": "Python Evidence", "answer": local_answer}
