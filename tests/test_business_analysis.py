@@ -1,5 +1,6 @@
 """Regression tests for trusted analytics and organized business reports."""
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ from utils.ai_analyst import (
     ask_ai,
     ask_business_analyst,
     normalize_report_markdown,
+    render_structured_report,
 )
 from utils.analytics import (
     build_inventory_priority,
@@ -131,6 +133,27 @@ class BusinessAnalysisTests(unittest.TestCase):
         self.assertIn("### Recommended Actions", formatted)
         self.assertNotIn("$", formatted)
         self.assertNotIn("\n\n\n", formatted)
+
+    def test_structured_ai_report_has_consistent_executive_format(self):
+        """JSON model output should become concise, scannable Markdown."""
+        raw = json.dumps({
+            "direct_answer": "Losses are concentrated in discounted products.",
+            "evidence": [
+                {"label": "Discount risk", "finding": "Profit was -$125,006.78."}
+            ],
+            "interpretation": ["High discounts are associated with weaker margins."],
+            "limitations": ["Product cost detail is unavailable."],
+            "actions": [
+                {"action": "Review discount approvals", "rationale": "Focus on loss bands."}
+            ],
+        })
+        formatted = render_structured_report(raw)
+
+        self.assertIn("### Direct Answer", formatted)
+        self.assertIn("- **Discount risk:**", formatted)
+        self.assertIn("-USD 125,006.78", formatted)
+        self.assertIn("1. **Review discount approvals**", formatted)
+        self.assertNotIn("$", formatted)
 
 
 if __name__ == "__main__":

@@ -73,9 +73,10 @@ def build_dimension_summary(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
         sales=("sales", "sum"), profit=("profit", "sum"),
         quantity=("quantity", "sum"), orders=("order_id", "nunique"),
         customers=("customer_id", "nunique"),
-        average_discount=("discount", "mean"),
+        average_discount_pct=("discount", "mean"),
         shipping_delay=("shipping_delay", "mean"),
     )
+    result["average_discount_pct"] *= 100
     return add_profit_margin(result)
 
 
@@ -92,9 +93,10 @@ def build_product_summary(df: pd.DataFrame) -> pd.DataFrame:
     product = df.groupby("product_name", observed=True, as_index=False).agg(
         sales=("sales", "sum"), profit=("profit", "sum"),
         quantity=("quantity", "sum"), orders=("order_id", "nunique"),
-        average_discount=("discount", "mean"),
+        average_discount_pct=("discount", "mean"),
         last_order_date=("order_date", "max"),
     )
+    product["average_discount_pct"] *= 100
     product = product.join(recent, on="product_name").fillna({"recent_90d_quantity": 0})
     product["days_since_last_order"] = (latest_date - product["last_order_date"]).dt.days
     return add_profit_margin(product)

@@ -8,6 +8,7 @@ auditable under the dashboard's active filters.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import unicodedata
@@ -109,6 +110,72 @@ def normalize_report_markdown(answer: str) -> str:
 
     # Avoid excessive blank space from variable model formatting.
     return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def render_structured_report(raw_response: str) -> str:
+    """Render a Gemini JSON report as consistent executive Markdown.
+
+    Invalid or legacy non-JSON responses fall back to the Markdown normalizer,
+    keeping deployments compatible while structured output propagates.
+    """
+    raw = str(raw_response).strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE)
+
+    try:
+        report = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return normalize_report_markdown(raw)
+
+    if not isinstance(report, dict) or not report.get("direct_answer"):
+        return normalize_report_markdown(raw)
+
+    def clean(value: object) -> str:
+        return normalize_report_markdown(str(value)).replace("\n", " ").strip()
+
+    sections = ["### Direct Answer", clean(report["direct_answer"])]
+
+    evidence = report.get("evidence", [])
+    if isinstance(evidence, list) and evidence:
+        sections.append("### Python-Verified Evidence")
+        rows = []
+        for item in evidence[:5]:
+            if isinstance(item, dict):
+                label = clean(item.get("label", "Finding"))
+                finding = clean(item.get("finding", ""))
+                if finding:
+                    rows.append(f"- **{label}:** {finding}")
+        sections.append("\n".join(rows))
+
+    interpretation = report.get("interpretation", [])
+    if isinstance(interpretation, list) and interpretation:
+        sections.extend([
+            "### Business Interpretation",
+            "\n".join(f"- {clean(item)}" for item in interpretation[:3]),
+        ])
+
+    limitations = report.get("limitations", [])
+    if isinstance(limitations, list) and limitations:
+        sections.extend([
+            "### Data Limitations",
+            "\n".join(f"- {clean(item)}" for item in limitations[:3]),
+        ])
+
+    actions = report.get("actions", [])
+    if isinstance(actions, list) and actions:
+        rows = []
+        for number, item in enumerate(actions[:5], start=1):
+            if isinstance(item, dict):
+                action = clean(item.get("action", ""))
+                rationale = clean(item.get("rationale", ""))
+                if action:
+                    detail = f" — {rationale}" if rationale else ""
+                    rows.append(f"{number}. **{action}**{detail}")
+            elif item:
+                rows.append(f"{number}. {clean(item)}")
+        sections.extend(["### Recommended Actions", "\n".join(rows)])
+
+    return "\n\n".join(section for section in sections if section)
 
 
 def is_dataset_question(question: str, df: pd.DataFrame) -> bool:
@@ -277,7 +344,7 @@ GOVERNANCE RULES
 7. Do not equate high margin with high demand. Cite volume/order evidence when
    recommending operational priority.
 8. Use full entity names exactly as shown in the evidence.
-9. Be concise, decision-oriented, and avoid generic filler.
+9. Be concise, decision-oriented, and avoid generic filler or repeated metrics.
 10. Answer only questions related to the supplied Superstore dataset or business
     decisions that can be evaluated from it. If a question is unrelated, state
     that this assistant is limited to the filtered Superstore business data.
@@ -287,23 +354,26 @@ GOVERNANCE RULES
 13. Do not invent numeric targets, thresholds, or policy limits. A number in a
     recommendation must come from the supplied evidence or be explicitly labeled
     as a proposed target requiring validation.
+14. Display discount rates as percentages, never raw decimal ratios. For example,
+    write 37.02%, not 0.3702.
+15. Do not use confidence language for recommendations. Reserve certainty for
+    directly calculated descriptive facts.
+16. Distinguish "associated with" from causation and do not say an item should be
+    discontinued when the evidence supports only review or investigation.
 
 REQUIRED RESPONSE FORMAT
-### Direct Answer
-Answer with an appropriate confidence qualifier.
-
-### Python-Verified Evidence
-List the strongest relevant facts and metrics.
-
-### Business Interpretation
-Explain what the facts suggest, without overstating them.
-
-### Data Limitations
-Name missing evidence that could materially change the conclusion. Write
-"None material for this descriptive question" only when appropriate.
-
-### Recommended Actions
-Give numbered, measurable next steps tied to the evidence.
+Return only valid JSON with this exact structure and no Markdown fences:
+{{
+  "direct_answer": "A focused answer of no more than three sentences.",
+  "evidence": [
+    {{"label": "Short label", "finding": "One verified finding with context."}}
+  ],
+  "interpretation": ["Two or three concise implications, without repeated figures."],
+  "limitations": ["Only limitations material to this decision."],
+  "actions": [
+    {{"action": "Specific action", "rationale": "Why this follows from evidence."}}
+  ]
+}}
 """
     # Keep a strong reference to the client for the complete network request.
     # Creating it inline can allow the temporary client to be finalized early
@@ -312,10 +382,11 @@ Give numbered, measurable next steps tied to the evidence.
     response = client.models.generate_content(
         model=get_model_name(),
         contents=prompt,
+        config={"response_mime_type": "application/json"},
     )
     if not getattr(response, "text", None):
         raise RuntimeError("The AI service returned an empty response.")
-    return normalize_report_markdown(response.text)
+    return render_structured_report(response.text)
 
 
 def ask_business_analyst(question: str, df: pd.DataFrame) -> dict[str, str]:
