@@ -213,8 +213,13 @@ Name missing evidence that could materially change the conclusion. Write
 ### Recommended Actions
 Give numbered, measurable next steps tied to the evidence.
 """
-    response = genai.Client(api_key=api_key).models.generate_content(
-        model=get_model_name(), contents=prompt
+    # Keep a strong reference to the client for the complete network request.
+    # Creating it inline can allow the temporary client to be finalized early
+    # in long-lived Streamlit runtimes, producing "client has been closed".
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=get_model_name(),
+        contents=prompt,
     )
     if not getattr(response, "text", None):
         raise RuntimeError("The AI service returned an empty response.")

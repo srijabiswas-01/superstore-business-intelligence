@@ -1,8 +1,9 @@
 """Regression tests for trusted analytics and organized business reports."""
 
 import unittest
+from unittest.mock import patch
 
-from utils.ai_analyst import ask_business_analyst
+from utils.ai_analyst import ask_ai, ask_business_analyst
 from utils.analytics import (
     build_inventory_priority,
     build_kpi_summary,
@@ -51,6 +52,33 @@ class BusinessAnalysisTests(unittest.TestCase):
             self.assertIn(heading, result["answer"])
         self.assertIn("proxy", result["answer"].lower())
         self.assertIn("lead time", result["answer"].lower())
+
+    def test_ai_client_stays_referenced_during_generation(self):
+        """Ensure the cloud request uses a live client through response creation."""
+        class FakeResponse:
+            text = "Grounded response"
+
+        class FakeModels:
+            def generate_content(self, **kwargs):
+                self.request = kwargs
+                return FakeResponse()
+
+        class FakeClient:
+            def __init__(self, api_key):
+                self.api_key = api_key
+                self.models = FakeModels()
+
+        class FakeGenAI:
+            Client = FakeClient
+
+        with (
+            patch("utils.ai_analyst.genai", FakeGenAI),
+            patch("utils.ai_analyst.get_api_key", return_value="test-key"),
+            patch("utils.ai_analyst.get_model_name", return_value="test-model"),
+        ):
+            answer = ask_ai("Summarize performance", self.df)
+
+        self.assertEqual(answer, "Grounded response")
 
 
 if __name__ == "__main__":
