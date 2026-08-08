@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 
 import pandas as pd
 import streamlit as st
@@ -78,6 +79,36 @@ def _single_result_report(answer: str, evidence: str, action: str) -> str:
         "Superstore transactions.\n\n"
         f"### Recommended Action\n{action}"
     )
+
+
+def normalize_report_markdown(answer: str) -> str:
+    """Normalize model output for stable, readable Streamlit Markdown.
+
+    Streamlit can interpret pairs of dollar signs as LaTeX math delimiters.
+    Currency is therefore converted to an explicit ``USD`` prefix. Common
+    heading variations are also converted to the report's canonical headings.
+    """
+    text = unicodedata.normalize("NFKC", str(answer)).strip()
+    text = re.sub(r"-\s*\$\s*(?=\d)", "-USD ", text)
+    text = re.sub(r"\$\s*(?=\d)", "USD ", text)
+
+    headings = (
+        "Direct Answer",
+        "Python-Verified Evidence",
+        "Business Interpretation",
+        "Data Limitations",
+        "Recommended Actions",
+        "Recommended Action",
+    )
+    for heading in headings:
+        pattern = (
+            rf"(?im)^\s*(?:#{{1,6}}\s*)?(?:\*\*)?"
+            rf"{re.escape(heading)}\s*:?(?:\*\*)?[ \t]*$"
+        )
+        text = re.sub(pattern, f"### {heading}", text)
+
+    # Avoid excessive blank space from variable model formatting.
+    return re.sub(r"\n{3,}", "\n\n", text)
 
 
 def is_dataset_question(question: str, df: pd.DataFrame) -> bool:
@@ -250,6 +281,12 @@ GOVERNANCE RULES
 10. Answer only questions related to the supplied Superstore dataset or business
     decisions that can be evaluated from it. If a question is unrelated, state
     that this assistant is limited to the filtered Superstore business data.
+11. Write currency as "USD 1,234.56" or "-USD 1,234.56". Never use dollar
+    symbols, LaTeX, mathematical markup, or escaped equations.
+12. Include no more than five evidence bullets and five recommended actions.
+13. Do not invent numeric targets, thresholds, or policy limits. A number in a
+    recommendation must come from the supplied evidence or be explicitly labeled
+    as a proposed target requiring validation.
 
 REQUIRED RESPONSE FORMAT
 ### Direct Answer
@@ -278,7 +315,7 @@ Give numbered, measurable next steps tied to the evidence.
     )
     if not getattr(response, "text", None):
         raise RuntimeError("The AI service returned an empty response.")
-    return response.text.strip()
+    return normalize_report_markdown(response.text)
 
 
 def ask_business_analyst(question: str, df: pd.DataFrame) -> dict[str, str]:
@@ -297,5 +334,11 @@ def ask_business_analyst(question: str, df: pd.DataFrame) -> dict[str, str]:
         }
     local_answer = answer_locally(question, df)
     if local_answer is not None:
-        return {"mode": "Python Evidence", "answer": local_answer}
-    return {"mode": "AI + Python Evidence", "answer": ask_ai(question, df)}
+        return {
+            "mode": "Python Evidence",
+            "answer": normalize_report_markdown(local_answer),
+        }
+    return {
+        "mode": "AI + Python Evidence",
+        "answer": normalize_report_markdown(ask_ai(question, df)),
+    }

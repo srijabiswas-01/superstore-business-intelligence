@@ -3,7 +3,11 @@
 import unittest
 from unittest.mock import patch
 
-from utils.ai_analyst import ask_ai, ask_business_analyst
+from utils.ai_analyst import (
+    ask_ai,
+    ask_business_analyst,
+    normalize_report_markdown,
+)
 from utils.analytics import (
     build_inventory_priority,
     build_kpi_summary,
@@ -112,6 +116,21 @@ class BusinessAnalysisTests(unittest.TestCase):
         self.assertEqual(result["mode"], "AI + Python Evidence")
         self.assertEqual(result["answer"], "Discount scenario analysis")
         mock_ask_ai.assert_called_once()
+
+    def test_report_normalizer_prevents_currency_math_rendering(self):
+        """Currency markers must not be interpreted as Streamlit LaTeX blocks."""
+        raw = (
+            "**Direct Answer**\nProfit was -$8,879.97 on $11,099.96 sales.\n\n\n"
+            "**Recommended Actions:**\nReview pricing."
+        )
+        formatted = normalize_report_markdown(raw)
+
+        self.assertIn("### Direct Answer", formatted)
+        self.assertIn("-USD 8,879.97", formatted)
+        self.assertIn("USD 11,099.96", formatted)
+        self.assertIn("### Recommended Actions", formatted)
+        self.assertNotIn("$", formatted)
+        self.assertNotIn("\n\n\n", formatted)
 
 
 if __name__ == "__main__":
