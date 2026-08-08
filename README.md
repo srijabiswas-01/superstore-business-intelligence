@@ -7,6 +7,14 @@ AI-assisted business analysis.
 
 **Live application:** [superstore-business-intelligence.streamlit.app](https://superstore-business-intelligence.streamlit.app)
 
+## Platform Home
+
+The Home page provides immediate confirmation that the dataset loaded correctly,
+summarizes the principal business KPIs, exposes the shared dashboard filters, and
+provides a preview of the processed transaction data used throughout the platform.
+
+![Superstore Business Intelligence Home](assets/screenshots/00-Home.png)
+
 ---
 
 ## Executive Summary
