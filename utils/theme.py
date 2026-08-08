@@ -106,6 +106,34 @@ def apply_dashboard_theme() -> None:
             border-color: var(--brand);
         }
 
+        /* Streamlit renders button labels inside nested Markdown elements.
+           Override the general muted paragraph color to preserve contrast. */
+        .stButton > button[kind="primary"] *,
+        .stButton > button[kind="primary"] p {
+            color: #06201c !important;
+        }
+
+        .stButton > button:not([kind="primary"]) *,
+        .stDownloadButton > button * {
+            color: var(--text) !important;
+        }
+
+        .stButton > button:not([kind="primary"]):hover *,
+        .stDownloadButton > button:hover * {
+            color: var(--brand) !important;
+        }
+
+        .stButton > button:disabled,
+        .stDownloadButton > button:disabled {
+            opacity: 0.62;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .stButton > button[kind="primary"]:disabled * {
+            color: #173d38 !important;
+        }
+
         div[data-baseweb="select"] > div,
         [data-testid="stTextInput"] input,
         [data-testid="stNumberInput"] input,
