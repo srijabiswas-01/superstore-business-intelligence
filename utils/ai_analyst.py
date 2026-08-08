@@ -112,6 +112,13 @@ def is_dataset_question(question: str, df: pd.DataFrame) -> bool:
         "quarter", "compare", "highest", "lowest", "best", "worst",
     }
     tokens = set(re.findall(r"[a-z0-9-]+", normalized))
+    # Match simple plural forms such as discounts, regions, products, and
+    # customers without forcing users to use the exact vocabulary in this set.
+    tokens.update(
+        token[:-1]
+        for token in tuple(tokens)
+        if len(token) > 3 and token.endswith("s")
+    )
     if tokens.intersection(business_terms):
         return True
 

@@ -101,6 +101,18 @@ class BusinessAnalysisTests(unittest.TestCase):
         self.assertEqual(result["answer"], "Relevant analysis")
         mock_ask_ai.assert_called_once()
 
+    @patch("utils.ai_analyst.ask_ai", return_value="Discount scenario analysis")
+    def test_plural_discount_question_passes_scope_guard(self, mock_ask_ai):
+        """Plural business vocabulary must be recognized as dataset-related."""
+        result = ask_business_analyst(
+            "What will happen if discounts increase by 10%?",
+            self.df,
+        )
+
+        self.assertEqual(result["mode"], "AI + Python Evidence")
+        self.assertEqual(result["answer"], "Discount scenario analysis")
+        mock_ask_ai.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
