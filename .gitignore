@@ -1,0 +1,13 @@
+# Local Python environment and generated files
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local credentials must never be committed
+.streamlit/secrets.toml
+.env
+
+# Generated model artifacts
+models/*.pkl
+models/*.joblib
