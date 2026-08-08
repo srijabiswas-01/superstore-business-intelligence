@@ -120,6 +120,17 @@ All pages share filters for year, region, category, and customer segment. This
 means a manager can select a business scope once and examine the same population
 through every analytical perspective.
 
+### Dataset Resources
+
+The Sample Superstore data and related reference files are available from:
+
+- **Tableau community resource:** [Sample - Superstore Sales (Excel)](https://community.tableau.com/s/question/0D54T00000CWeX8SAL/sample-superstore-sales-excelxls)
+- **Kaggle dataset:** [Superstore Dataset](https://www.kaggle.com/datasets/vivek468/superstore-dataset-final)
+
+The copy included in this project is used for educational business-intelligence
+analysis. Dataset users should review the source pages for their current access,
+usage, and attribution conditions.
+
 ---
 
 ## Decision Workflow
