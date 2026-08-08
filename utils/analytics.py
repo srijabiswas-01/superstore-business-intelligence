@@ -65,6 +65,72 @@ def build_yearly_summary(df: pd.DataFrame) -> pd.DataFrame:
     return add_profit_margin(yearly)
 
 
+def build_monthly_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate sales, profit, quantity, and orders for each calendar month."""
+    monthly = (
+        df.set_index("order_date")
+        .resample("MS")
+        .agg(
+            sales=("sales", "sum"),
+            profit=("profit", "sum"),
+            quantity=("quantity", "sum"),
+            orders=("order_id", "nunique"),
+        )
+        .reset_index()
+    )
+    monthly["year"] = monthly["order_date"].dt.year
+    monthly["month_num"] = monthly["order_date"].dt.month
+    monthly["month"] = monthly["order_date"].dt.month_name()
+    return add_profit_margin(monthly)
+
+
+def build_seasonality_summary(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Measure yearly monthly variation and the recurring calendar-month profile.
+
+    Returns:
+        A pair containing yearly variability statistics and a month-of-year
+        profile. The coefficient of variation describes within-year monthly
+        volatility; the seasonal index compares each calendar month's average
+        sales with the average month across the full filtered history.
+    """
+    monthly = build_monthly_summary(df)
+    yearly_rows = []
+    for year, group in monthly.groupby("year", sort=True):
+        peak = group.loc[group["sales"].idxmax()]
+        trough = group.loc[group["sales"].idxmin()]
+        mean_sales = group["sales"].mean()
+        yearly_rows.append({
+            "year": int(year),
+            "average_monthly_sales": mean_sales,
+            "monthly_sales_std": group["sales"].std(ddof=0),
+            "monthly_variation_pct": (
+                group["sales"].std(ddof=0) / mean_sales * 100 if mean_sales else 0.0
+            ),
+            "peak_month": peak["month"],
+            "peak_month_sales": peak["sales"],
+            "lowest_month": trough["month"],
+            "lowest_month_sales": trough["sales"],
+        })
+
+    yearly_variation = pd.DataFrame(yearly_rows)
+    month_profile = (
+        monthly.groupby(["month_num", "month"], as_index=False)
+        .agg(
+            average_sales=("sales", "mean"),
+            median_sales=("sales", "median"),
+            years_observed=("year", "nunique"),
+        )
+        .sort_values("month_num")
+    )
+    overall_monthly_average = monthly["sales"].mean()
+    month_profile["seasonal_index"] = np.where(
+        overall_monthly_average != 0,
+        month_profile["average_sales"] / overall_monthly_average * 100,
+        0.0,
+    )
+    return yearly_variation, month_profile
+
+
 def build_dimension_summary(df: pd.DataFrame, dimension: str) -> pd.DataFrame:
     """Aggregate commercial and operational metrics for one dimension."""
     if dimension not in df.columns:
@@ -143,9 +209,13 @@ def build_business_context(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Create the compact, trusted evidence package supplied to the AI."""
     validate_analysis_data(df)
     products = build_product_summary(df)
+    yearly_seasonality, month_profile = build_seasonality_summary(df)
     context = {
         "KPI SUMMARY": build_kpi_summary(df),
         "YEARLY PERFORMANCE": build_yearly_summary(df),
+        "MONTHLY PERFORMANCE": build_monthly_summary(df),
+        "YEARLY MONTHLY VARIATION": yearly_seasonality,
+        "CALENDAR MONTH SEASONAL PROFILE": month_profile,
         "REGIONAL PERFORMANCE": build_dimension_summary(df, "region"),
         "CATEGORY PERFORMANCE": build_dimension_summary(df, "category"),
         "SUB-CATEGORY PERFORMANCE": build_dimension_summary(df, "sub_category"),

@@ -25,7 +25,54 @@ from utils.analytics import (
     context_to_text,
     validate_analysis_data,
 )
-from utils.insight_engine import build_inventory_report, is_inventory_question
+from utils.insight_engine import (
+    build_inventory_report,
+    build_seasonality_report,
+    is_inventory_question,
+    is_seasonality_question,
+)
+
+
+STRUCTURED_REPORT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "direct_answer", "evidence", "interpretation", "limitations", "actions"
+    ],
+    "properties": {
+        "direct_answer": {"type": "string", "minLength": 20},
+        "evidence": {
+            "type": "array", "minItems": 1, "maxItems": 5,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["label", "finding"],
+                "properties": {
+                    "label": {"type": "string"},
+                    "finding": {"type": "string"},
+                },
+            },
+        },
+        "interpretation": {
+            "type": "array", "minItems": 1, "maxItems": 3,
+            "items": {"type": "string"},
+        },
+        "limitations": {
+            "type": "array", "minItems": 1, "maxItems": 3,
+            "items": {"type": "string"},
+        },
+        "actions": {
+            "type": "array", "minItems": 1, "maxItems": 5,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["action", "rationale"],
+                "properties": {
+                    "action": {"type": "string"},
+                    "rationale": {"type": "string"},
+                },
+            },
+        },
+    },
+}
 
 try:
     from google import genai
@@ -103,8 +150,8 @@ def normalize_report_markdown(answer: str) -> str:
     )
     for heading in headings:
         pattern = (
-            rf"(?im)^\s*(?:#{{1,6}}\s*)?(?:\*\*)?"
-            rf"{re.escape(heading)}\s*:?(?:\*\*)?[ \t]*$"
+            rf"(?im)^[ \t]*(?:#{{1,6}}[ \t]*)?(?:\*\*)?"
+            rf"{re.escape(heading)}[ \t]*:?(?:\*\*)?[ \t]*$"
         )
         text = re.sub(pattern, f"### {heading}", text)
 
@@ -178,6 +225,29 @@ def render_structured_report(raw_response: str) -> str:
     return "\n\n".join(section for section in sections if section)
 
 
+def is_complete_structured_report(raw_response: str) -> bool:
+    """Validate that model JSON contains every required analytical section."""
+    raw = str(raw_response).strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE)
+    try:
+        report = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(report, dict) or not str(report.get("direct_answer", "")).strip():
+        return False
+    for section in ("evidence", "interpretation", "limitations", "actions"):
+        if not isinstance(report.get(section), list) or not report[section]:
+            return False
+    return all(
+        isinstance(item, dict) and item.get("label") and item.get("finding")
+        for item in report["evidence"]
+    ) and all(
+        isinstance(item, dict) and item.get("action") and item.get("rationale")
+        for item in report["actions"]
+    )
+
+
 def is_dataset_question(question: str, df: pd.DataFrame) -> bool:
     """Return whether a question belongs to the Superstore analysis domain.
 
@@ -205,6 +275,7 @@ def is_dataset_question(question: str, df: pd.DataFrame) -> bool:
         "discount", "discounting", "price", "pricing", "quantity", "units",
         "shipping", "delivery", "delay", "ship mode", "inventory", "stock",
         "replenishment", "forecast", "forecasting", "growth", "trend", "risk",
+        "season", "seasonal", "seasonality",
         "performance", "opportunity", "opportunities", "management", "business",
         "priority", "priorities", "strategy", "operations", "year", "month",
         "quarter", "compare", "highest", "lowest", "best", "worst",
@@ -239,6 +310,9 @@ def answer_locally(question: str, df: pd.DataFrame) -> str | None:
 
     if is_inventory_question(q):
         return build_inventory_report(df)
+
+    if is_seasonality_question(q):
+        return build_seasonality_report(df)
 
     yearly = None
     if "year" in q:
@@ -379,14 +453,27 @@ Return only valid JSON with this exact structure and no Markdown fences:
     # Creating it inline can allow the temporary client to be finalized early
     # in long-lived Streamlit runtimes, producing "client has been closed".
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=get_model_name(),
-        contents=prompt,
-        config={"response_mime_type": "application/json"},
+    for attempt in range(2):
+        request = prompt
+        if attempt:
+            request += (
+                "\nYour previous response was incomplete. Return every required JSON "
+                "field with at least one substantive item."
+            )
+        response = client.models.generate_content(
+            model=get_model_name(),
+            contents=request,
+            config={
+                "response_mime_type": "application/json",
+                "response_json_schema": STRUCTURED_REPORT_SCHEMA,
+            },
+        )
+        if getattr(response, "text", None) and is_complete_structured_report(response.text):
+            return render_structured_report(response.text)
+
+    raise RuntimeError(
+        "The AI service returned an incomplete analytical report after two attempts."
     )
-    if not getattr(response, "text", None):
-        raise RuntimeError("The AI service returned an empty response.")
-    return render_structured_report(response.text)
 
 
 def ask_business_analyst(question: str, df: pd.DataFrame) -> dict[str, str]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from utils.analytics import build_inventory_priority
+from utils.analytics import build_inventory_priority, build_seasonality_summary
 
 
 INVENTORY_LIMITATIONS = (
@@ -60,3 +60,56 @@ def is_inventory_question(question: str) -> bool:
     normalized = question.casefold()
     terms = ("inventory", "stock", "replenish", "reorder", "allocation")
     return any(term in normalized for term in terms)
+
+
+def is_seasonality_question(question: str) -> bool:
+    """Identify questions about recurring seasonal or monthly sales patterns."""
+    normalized = question.casefold()
+    return any(term in normalized for term in ("seasonal", "seasonality", "season"))
+
+
+def build_seasonality_report(df: pd.DataFrame) -> str:
+    """Explain sales seasonality using monthly patterns and yearly variability."""
+    yearly, profile = build_seasonality_summary(df)
+    if yearly.empty or profile.empty:
+        return (
+            "### Direct Answer\nThere is not enough monthly history to assess seasonality.\n\n"
+            "### Data Limitations\nAt least one complete year of monthly observations is required."
+        )
+
+    first = yearly.iloc[0]
+    last = yearly.iloc[-1]
+    direction = "increased" if last["monthly_variation_pct"] > first["monthly_variation_pct"] else "decreased"
+    strongest = profile.nlargest(3, "seasonal_index")
+    strongest_text = ", ".join(
+        f"{row['month']} ({row['seasonal_index']:.1f})"
+        for _, row in strongest.iterrows()
+    )
+    yearly_lines = "\n".join(
+        f"- **{int(row['year'])}:** monthly variation {row['monthly_variation_pct']:.1f}%; "
+        f"peak month {row['peak_month']} with {_money(row['peak_month_sales'])} in sales."
+        for _, row in yearly.iterrows()
+    )
+
+    return (
+        "### Direct Answer\n"
+        f"Monthly sales variation {direction} from {first['monthly_variation_pct']:.1f}% "
+        f"in {int(first['year'])} to {last['monthly_variation_pct']:.1f}% in "
+        f"{int(last['year'])}. The history also shows recurring calendar-month "
+        "concentration, but four years are not enough to establish a durable "
+        "long-term change in seasonality.\n\n"
+        "### Python-Verified Evidence\n"
+        f"The strongest average calendar months by seasonal index are {strongest_text}; "
+        "100 represents an average month.\n"
+        f"{yearly_lines}\n\n"
+        "### Business Interpretation\n"
+        "The data supports monthly seasonality analysis and indicates whether within-year "
+        "variation changed historically. It does not prove that the pattern will persist.\n\n"
+        "### Data Limitations\n"
+        "Only four annual cycles are available, and the dataset contains no holidays, "
+        "promotions, market conditions, or external demand drivers.\n\n"
+        "### Recommended Actions\n"
+        "1. Use the monthly seasonal profile as a planning baseline.\n"
+        "2. Validate peak months against promotion and holiday calendars.\n"
+        "3. Refresh the analysis as additional years become available."
+    )

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from utils.ai_analyst import (
     ask_ai,
     ask_business_analyst,
+    is_complete_structured_report,
     normalize_report_markdown,
     render_structured_report,
 )
@@ -14,6 +15,7 @@ from utils.analytics import (
     build_inventory_priority,
     build_kpi_summary,
     build_product_summary,
+    build_seasonality_summary,
 )
 from utils.data_loader import load_processed_data
 
@@ -62,7 +64,13 @@ class BusinessAnalysisTests(unittest.TestCase):
     def test_ai_client_stays_referenced_during_generation(self):
         """Ensure the cloud request uses a live client through response creation."""
         class FakeResponse:
-            text = "Grounded response"
+            text = json.dumps({
+                "direct_answer": "Grounded response based on supplied evidence.",
+                "evidence": [{"label": "Result", "finding": "Verified value."}],
+                "interpretation": ["The result supports further review."],
+                "limitations": ["Only supplied data was evaluated."],
+                "actions": [{"action": "Review result", "rationale": "Validate it."}],
+            })
 
         class FakeModels:
             def generate_content(self, **kwargs):
@@ -84,7 +92,8 @@ class BusinessAnalysisTests(unittest.TestCase):
         ):
             answer = ask_ai("Summarize performance", self.df)
 
-        self.assertEqual(answer, "Grounded response")
+        self.assertIn("### Direct Answer", answer)
+        self.assertIn("Grounded response", answer)
 
     @patch("utils.ai_analyst.ask_ai")
     def test_unrelated_command_is_rejected_without_ai_call(self, mock_ask_ai):
@@ -154,6 +163,32 @@ class BusinessAnalysisTests(unittest.TestCase):
         self.assertIn("-USD 125,006.78", formatted)
         self.assertIn("1. **Review discount approvals**", formatted)
         self.assertNotIn("$", formatted)
+
+    def test_incomplete_ai_report_is_rejected(self):
+        """A direct answer alone must not pass the professional report contract."""
+        incomplete = json.dumps({"direct_answer": "Only one section was returned."})
+        self.assertFalse(is_complete_structured_report(incomplete))
+
+    def test_seasonality_summary_uses_monthly_history(self):
+        """Seasonality evidence should cover every year and calendar month."""
+        yearly, profile = build_seasonality_summary(self.df)
+
+        self.assertEqual(len(yearly), self.df["order_year"].nunique())
+        self.assertEqual(len(profile), 12)
+        self.assertTrue(yearly["monthly_variation_pct"].ge(0).all())
+
+    @patch("utils.ai_analyst.ask_ai")
+    def test_seasonality_question_uses_python_monthly_evidence(self, mock_ask_ai):
+        """Seasonality questions must not be rejected or delegated without evidence."""
+        result = ask_business_analyst(
+            "Are sales becoming more seasonal?",
+            self.df,
+        )
+
+        self.assertEqual(result["mode"], "Python Evidence")
+        self.assertIn("monthly sales variation", result["answer"].lower())
+        self.assertIn("four years", result["answer"].lower())
+        mock_ask_ai.assert_not_called()
 
 
 if __name__ == "__main__":
